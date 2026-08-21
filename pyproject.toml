@@ -1,0 +1,18 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "fit-psychometric"
+version = "0.1.0"
+description = "Tutorials and functions to fit psychometric functions"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "numpy",
+    "scipy",
+    "statsmodels",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["fit_psychometric"]
