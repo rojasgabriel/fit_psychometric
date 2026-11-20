@@ -7,12 +7,6 @@ from statsmodels.base.model import GenericLikelihoodModel
 from scipy.optimize import minimize
 import numpy as np
 
-# weibull fit
-def weibull(bias, slope, gamma1, gamma2, X):
-    ''' weibull function with lapse rates
-    '''
-    return gamma1 + (1. - gamma1 - gamma2) * (erf((X - bias) / slope) + 1.) / 2. +1e-9
-
 def cumulative_gaussian(alpha,beta,gamma,lmbda, X):
     '''
     Evaluate the cumulative gaussian psychometric function.
@@ -25,8 +19,8 @@ def cumulative_gaussian(alpha,beta,gamma,lmbda, X):
     Joao Couto - Jan 2022    
     '''
         
-    from scipy.special import erfc # import the complementary error function
-    return  gamma + (1 - gamma - lmbda)*0.5*erfc(-beta*(X-alpha)/np.sqrt(2))+1e-9    
+    #from scipy.special import erfc # import the complementary error function
+    return  gamma + (1 - gamma - lmbda)*0.5*erfc(-beta*(X-alpha)/np.sqrt(2))#+1e-9    
 
 # log likelihood when using minimize
 def neg_log_likelihood_error(func, parameters, X, Y):
@@ -132,19 +126,21 @@ class PsychometricRegression(GenericLikelihoodModel):
             self.fit_function = cumulative_gaussian
             self.exog_names[:] = ['bias','sensitivity','gamma1','gamma2']
             self.bounds = [(np.min(self.exog[:,0]),np.max(self.exog[:,0])),
-                           (0.001,0.3),
+                           (0.001,0.5), #(0.001,0.3),
                            (0,0.5),(0,0.5)]
             self.get_start_params  = lambda x,y: [0,1./np.max(x),y[0],1-y[-1]]
             
+        # Override the default bounds only when explicitly supplied.
+        if bounds is not None:
+            self.bounds = bounds
+            
     
     def loglikeobs(self,params):
-        pX = self.fit_function(*params, self.exog[:,0])
-        pX[pX<=0] = 0.0001
-        pX[pX>=1] = 0.9999
-        ii = np.where(np.isfinite(pX))
-        # the predicted performance for X from the PMF
-        val = np.nansum(self.endog[ii]*np.log(pX[ii]) + (1-self.endog[ii])*np.log(1-pX[ii]))
-        return val
+        pX = self.fit_function(*params, self.exog[:, 0])
+        # Protect logarithms without abrupt boundary replacements.
+        pX = np.clip(pX, 1e-10, 1 - 1e-10)
+        # One log-likelihood contribution per trial.
+        return (self.endog * np.log(pX) + (1 - self.endog) * np.log1p(-pX))
     
     def fit(self, start_params=None,
             maxiter=100000,
@@ -156,7 +152,7 @@ class PsychometricRegression(GenericLikelihoodModel):
         if len(self.stims) < min_required_stim_values:
             return None
         
-        if start_params == None:
+        if start_params is None:
             # Reasonable starting values
             if not self.get_start_params is None:
                 start_params = self.get_start_params(self.stims, self.p_side)
@@ -178,6 +174,8 @@ class PsychometricRegression(GenericLikelihoodModel):
 def fit_psychometric(stim_values, response_values,
                      func = cumulative_gaussian,    # to fit the psychometric
                      min_required_stim_values = 6,  # min values required to fit the function
+                     bounds=None,
+                     start_params=None,
                      method = 'PsychometricRegression'):#'Nelder-Mead'):#'L-BFGS-B'):
     '''
     Fits a psychometric curve and computes points
@@ -187,8 +185,11 @@ def fit_psychometric(stim_values, response_values,
     if method == 'PsychometricRegression':
         # use PsychometricRegression (default weibull)
         ft = PsychometricRegression(response_values.astype(float),
-                                    exog = stim_values.astype(float))
-        res = ft.fit(min_required_stim_values = min_required_stim_values, full_output=True)
+                                    exog = stim_values.astype(float),
+                                    bounds=bounds)
+        res = ft.fit(start_params=start_params,
+                     min_required_stim_values = min_required_stim_values, 
+                     full_output=True)
         if res is None:
             fit_res = None
             params = None
